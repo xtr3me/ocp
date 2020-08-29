@@ -194,6 +194,11 @@ func primeUrl(u Url) error {
 		if verbose {
 			log.Printf("Get (weight %d) %s\n", weight, u.Loc)
 		}
+
+		if purgeBeforePrime {
+			purgeUrl(u, weight)
+		}
+
 		res, err := get(u.Loc)
 		if err != nil {
 			if !nowarn {
@@ -214,6 +219,34 @@ func primeUrl(u Url) error {
 	return err
 }
 
+func purgeUrl(u Url, weight int) {
+	url, err := url.Parse(u.Loc)
+	if err != nil {
+		panic(err)
+	} else {
+		purgeUrl := fmt.Sprintf("%s://%s/purge%s", url.Scheme, url.Host, url.Path)
+		if verbose {
+			log.Println("Purge Url:", purgeUrl)
+		}
+
+		res, err := get(purgeUrl)
+		if err != nil {
+			if !nowarn {
+				log.Printf("Error purging %s: %v\n", purgeUrl, err)
+			}
+		} else {
+			res.Body.Close()
+			if res.Status == "404 Not Found" && cacheStats {
+				log.Printf("MISS: Url was not cached %s\n", u.Loc)
+			} else if res.Status == "200 OK" && cacheStats {
+				log.Printf("HIT: Url was cached %s\n", u.Loc)
+			} else if res.Status != "200 OK" && !nowarn {
+				log.Printf("Bad response for %s: %s\n", purgeUrl, res.Status)
+			}
+		}
+	}
+}
+
 func maxStopper() {
 	count := uint(0)
 	for {
@@ -227,16 +260,18 @@ func maxStopper() {
 }
 
 var (
-	throttle    uint
-	max         uint
-	localDir    string
-	localSuffix string
-	userAgent   string
-	verbose     bool
-	nowarn      bool
-	printUrls   bool
-	primeUrls   bool
-	insecureSsl bool
+	throttle         uint
+	max              uint
+	localDir         string
+	localSuffix      string
+	userAgent        string
+	verbose          bool
+	nowarn           bool
+	printUrls        bool
+	primeUrls        bool
+	insecureSsl      bool
+	purgeBeforePrime bool
+	cacheStats       bool
 )
 
 func init() {
@@ -250,6 +285,8 @@ func init() {
 	flag.BoolVar(&printUrls, "print", false, "(exclusive) just print the sorted URLs (can be used with xargs)")
 	flag.BoolVar(&primeUrls, "urls", false, "prime the URLs given as arguments rather than a sitemap")
 	flag.BoolVar(&insecureSsl, "insecure-ssl", false, "disable SSL certificate verification when priming HTTPS URLs")
+	flag.BoolVar(&purgeBeforePrime, "purge-before-prime", false, "sends the purge command before priming the url")
+	flag.BoolVar(&cacheStats, "cache-stats", false, "Report cache HIT or MISS when purging the url")
 	flag.Parse()
 }
 
@@ -300,7 +337,7 @@ func main() {
 	if err != nil {
 		fmt.Println("Error:", err)
 		if strings.HasSuffix(err.Error(), "x509: certificate signed by unknown authority") {
-			fmt.Println("\nUse the --insecure-ssl toggle to disable certificate verification") 
+			fmt.Println("\nUse the --insecure-ssl toggle to disable certificate verification")
 		}
 	} else {
 		sort.Sort(urlset)
